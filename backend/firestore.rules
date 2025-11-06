@@ -1,0 +1,253 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can read/write their own profile
+    match /users/{userId} {
+      // Allow authenticated users to update their own profile
+      allow read, write, update, delete: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow guest users to create their own profile (no authentication required)
+      allow create: if request.auth == null && 
+        request.resource.data.isGuest == true &&
+        userId.matches('guest_.*');
+
+      // Allow admins to update any user's managedClubIds and role
+      allow read, write, update, delete: if request.auth != null && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+
+      // Allow contributors to update managedClubIds for others only if removing their own club
+      allow update: if request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'contributor';
+
+      // Allow contributors to read user profiles (needed for contributor management)
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'contributor';
+    }
+    
+    // Public read access for events, clubs, leadership, etc.
+    match /events/{clubId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+
+      // Subcollection: clubEvents
+      match /clubEvents/{eventId} {
+        allow read: if true;
+        allow write, update: if request.auth != null;
+      }
+    }
+
+    match /{path=**}/clubEvents/{eventId} {
+      allow read: if true;
+      allow write, update: if request.auth != null;
+    }
+    
+    match /clubs/{document} {
+      allow read: if true;
+      allow write: if request.auth != null;
+
+      // Subcollection for club applications
+      match /applications/{applicationId} {
+        // Allow public read access for club applications
+        allow read: if true;
+        // Allow authenticated users to create application docs
+        allow create: if request.auth != null;
+        // Allow admins and contributors to update/delete applications
+        allow update, delete: if request.auth != null &&
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor'];
+      }
+
+      // Subcollection for payment details - public read, admin/contributor write
+      match /paymentDetails/{document} {
+        // Allow public read access (needed for event registration)
+        allow read: if true;
+        // Allow write if user is admin or contributor
+        allow write: if request.auth != null && 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+      }
+    }
+    
+    match /leadership/{document} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    match /annualEvents/{document} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    match /news/{document} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    match /externalEvents/{document} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    // Notifications - users can read their own, admins can read all
+    match /notifications/{document} {
+      allow read: if 
+        // Allow authenticated users to read their own notifications or admins to read all
+        (request.auth != null && 
+         (resource.data.userId == request.auth.uid || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'))) ||
+        // Allow guest users to read their own notifications (no authentication required)
+        (request.auth == null && resource.data.userId != null);
+      allow write: if request.auth != null;
+    }
+    
+    // Applications - allow public read for initial data load, restricted write
+    match /applications/{document} {
+      // Allow public read access (needed for initial data loading)
+      allow read: if true;
+      // Allow authenticated users to write applications
+      allow write: if request.auth != null;
+      // Allow admins and contributors to read/write/delete all applications
+      allow read, write, delete: if request.auth != null && 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+    }
+    
+    // Event Registrations - users can read/write their own, admins and contributors can read all
+    match /events/{clubId}/clubEvents/{eventId}/registrations/{registrationId} {
+      // Allow public read access for list queries and specific registrations
+      allow read: if true;
+      
+      // Allow create for authenticated users creating their own registration
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      
+      // Allow create for guest users (no authentication required)
+      allow create: if request.auth == null && 
+        request.resource.data.userId != null &&
+        request.resource.data.userId.matches('guest_.*');
+      
+      // Allow update/delete for authenticated users who own the registration or are admin/contributor
+      allow update, delete: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor'])
+        // Allow update if user is updating their own registration OR if the update is only for paymentStatus/paymentId/status and the user is the one who created the registration
+        || (
+          request.resource.data.paymentStatus == 'paid' &&
+          resource.data.userId == request.auth.uid
+        )
+      );
+      
+      // Allow update for guest users who own the registration (no authentication required)
+      allow update: if request.auth == null && 
+        resource.data.userId != null &&
+        resource.data.userId.matches('guest_.*') &&
+        request.resource.data.userId == resource.data.userId;
+    }
+
+    // Guest Event Registrations - allow guest users to create registrations without authentication
+    match /events/{clubId}/clubEvents/{eventId}/guestRegistrations/{registrationId} {
+      // Allow read access for guest registrations (public read for list queries, specific read for own registrations)
+      allow read: if true;
+      // Allow create for guest registrations (no authentication required)
+      allow create: if request.resource.data.isGuest == true;
+      // Allow update/delete for admins and contributors only
+      allow update, delete: if request.auth != null && 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+    }
+
+    // PhonePe Accounts - users can read/write their own accounts
+    match /phonepeAccounts/{document} {
+      // Allow read/write if user owns the account
+      allow read, write: if request.auth != null && 
+        resource.data.userId == request.auth.uid;
+      // Allow write for new documents (when creating account)
+      allow write: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      // Allow admins to read all accounts
+      allow read: if request.auth != null && 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+      // Allow anyone to read accounts for club lookup (needed for payment processing)
+      allow read: if request.auth != null;
+    }
+    
+    // Payment Configurations - users can read/write their own configurations
+    match /paymentConfigurations/{document} {
+      // Allow read/write if user is admin or contributor
+      allow read, write: if request.auth != null && 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+    }
+    
+    // Event Payments - allow authenticated users to write their own payment record, admins/contributors can read all
+    match /events/{clubId}/clubEvents/{eventId}/payments/{paymentId} {
+      // Allow create if user is authenticated and is creating their own payment record
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      
+      // Allow read for the user who created the payment record, admins and contributors
+      allow read: if request.auth != null && (
+        resource.data.userId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor'])
+      );
+      
+      // Allow update/delete for admins and contributors
+      allow update, delete: if request.auth != null &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+    }
+    
+    // Guest Event Payments - allow guest users to create and read their own payment records
+    match /events/{clubId}/clubEvents/{eventId}/guest_payments/{paymentId} {
+      // Allow create for guest users (no authentication required)
+      allow create: if request.auth == null && 
+        request.resource.data.userId != null &&
+        request.resource.data.userId.matches('guest_.*');
+      
+      // Allow read for guest users who created the payment record
+      allow read: if request.auth == null && 
+        resource.data.userId != null &&
+        resource.data.userId.matches('guest_.*');
+      
+      // Allow read for admins and contributors
+      allow read: if request.auth != null &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+      
+      // Allow update/delete for admins and contributors
+      allow update, delete: if request.auth != null &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+    }
+    
+    // Event Teams - allow authenticated users to create/join/search teams for team events
+    match /events/{clubId}/clubEvents/{eventId}/teams/{teamId} {
+      // Allow create if user is authenticated and is adding themselves as a member
+      allow create: if request.auth != null && request.resource.data.members[0].userId == request.auth.uid;
+      // Allow read for authenticated users (to search/join teams)
+      allow read: if request.auth != null;
+      // Allow update (join team) if user is authenticated and is adding themselves to the members array
+      allow update: if request.auth != null &&
+        request.resource.data.members.size() > resource.data.members.size() &&
+        request.resource.data.members[request.resource.data.members.size() - 1].userId == request.auth.uid;
+      // Allow delete for admins and contributors
+      allow delete: if request.auth != null &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'contributor']);
+    }
+    
+    // OTP Verifications - Only accessible by Firebase Functions (server-side)
+    // This collection stores temporary OTP data and should not be accessible by client-side code
+    match /otp_verifications/{document} {
+      // Deny all client-side access for security
+      // Only Firebase Functions (server-side) can access this collection
+      allow read, write: if false;
+    }
+  }
+}
+

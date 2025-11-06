@@ -1,0 +1,17 @@
+{
+  "name": "guest-data-cleanup",
+  "version": "1.0.0",
+  "description": "Manual cleanup script for expired guest data",
+  "main": "cleanup-guest-data.js",
+  "scripts": {
+    "cleanup": "node cleanup-guest-data.js",
+    "cleanup:dry-run": "node cleanup-guest-data.js --dry-run"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

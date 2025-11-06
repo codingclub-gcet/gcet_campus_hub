@@ -1,0 +1,32 @@
+{
+  "name": "campus-hub-app",
+  "version": "1.0.0",
+  "description": "Campus Hub Application with Frontend and Backend",
+  "scripts": {
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "preview": "cd frontend && npm run preview",
+    "install-frontend": "cd frontend && npm install",
+    "install-backend": "cd backend/functions && npm install",
+    "install-all": "npm run install-frontend && npm run install-backend",
+    "deploy-functions": "cd backend && ./deploy-functions.sh",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d frontend/dist"
+  },
+  "keywords": [
+    "campus",
+    "hub",
+    "events",
+    "clubs"
+  ],
+  "author": "GCET",
+  "license": "MIT",
+  "dependencies": {
+    "cashfree-pg": "^5.0.8",
+    "dotenv": "^17.2.2"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
+  },
+  "homepage": "https://Paramesh2545.github.io/gcet_campus_hub/"
+}
